@@ -31,20 +31,27 @@
 #include "app_assert.h"
 #include "sl_bluetooth.h"
 #include "app.h"
+#include "app_log.h"
+#include "sl_sensor_rht.h"
+#include "temperature.h"
+#include "sl_bt_api.h"
+#include "gatt_db.h"
 
 // The advertising set handle allocated from Bluetooth stack.
 static uint8_t advertising_set_handle = 0xff;
 
 /**************************************************************************//**
- * Application Init.
+ * Application Initialization Function
  *****************************************************************************/
 SL_WEAK void app_init(void)
 {
-  /////////////////////////////////////////////////////////////////////////////
-  // Put your additional application init code here!                         //
-  // This is called once during start-up.                                    //
-  /////////////////////////////////////////////////////////////////////////////
+    // Add your additional application initialization code here!
+    // This function is called once during startup.
+
+    // Log a message indicating the function entry
+    app_log_info("%s\n", __FUNCTION__);
 }
+
 
 /**************************************************************************//**
  * Application Process Action.
@@ -74,6 +81,8 @@ void sl_bt_on_event(sl_bt_msg_t *evt)
     // Do not call any stack command before receiving this boot event!
     case sl_bt_evt_system_boot_id:
       // Create an advertising set.
+
+
       sc = sl_bt_advertiser_create_set(&advertising_set_handle);
       app_assert_status(sc);
 
@@ -99,11 +108,38 @@ void sl_bt_on_event(sl_bt_msg_t *evt)
     // -------------------------------
     // This event indicates that a new connection was opened.
     case sl_bt_evt_connection_opened_id:
-      break;
+      app_log_info("%s: connection_opened!\n", __FUNCTION__);
+      sc = sl_sensor_rht_init();
 
+
+      break;
+    case sl_bt_evt_gatt_server_user_read_request_id:
+    {
+        app_log_info("%s: Read button opened!\n", __FUNCTION__);
+        int16_t bleTemperature;
+        sl_status_t status = getAndConvertTemperatureToBLE(&bleTemperature);
+
+        if (status == SL_STATUS_OK){
+            app_log_info("Temperature (BLE format): %d\n", bleTemperature);
+        } else {
+            app_log_info("Failed to get temperature (Status: %lu)\n", (unsigned long)status);
+        }
+
+        // Check for gattdb_temperature_0 characteristic
+        const sl_bt_evt_gatt_server_user_read_request_t *read_request = &evt->data.evt_gatt_server_user_read_request;
+
+        if (read_request->characteristic == gattdb_temperature_0) {
+            app_log_info("Read request for gattdb_temperature_0 detected.\n");
+            // Handle gattdb_temperature_0 read request here if needed
+        }
+    }
+    break;
     // -------------------------------
     // This event indicates that a connection was closed.
     case sl_bt_evt_connection_closed_id:
+      app_log_info("%s: connection_closed!\n", __FUNCTION__);
+      sl_sensor_rht_deinit();
+
       // Generate data for advertising
       sc = sl_bt_legacy_advertiser_generate_data(advertising_set_handle,
                                                  sl_bt_advertiser_general_discoverable);
@@ -114,6 +150,8 @@ void sl_bt_on_event(sl_bt_msg_t *evt)
                                          sl_bt_advertiser_connectable_scannable);
       app_assert_status(sc);
       break;
+
+
 
     ///////////////////////////////////////////////////////////////////////////
     // Add additional event handlers here as your application requires!      //
