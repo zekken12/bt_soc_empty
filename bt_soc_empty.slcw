@@ -1,0 +1,7 @@
+---
+label: "bt_soc_empty"
+quality: "unknown"
+project:
+- id: "main"
+  path: "bt_soc_empty.slcp"
+  output: "."

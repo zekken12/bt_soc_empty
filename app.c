@@ -74,7 +74,23 @@ SL_WEAK void app_process_action(void)
 void sl_bt_on_event(sl_bt_msg_t *evt)
 {
   sl_status_t sc;
+  void myTimerCallback(sl_sleeptimer_timer_handle_t *handle, void *data) {
+      static int step = 1;
+      app_log_info("Timer step %d\n", step++);
+  }
+  void displayTemperature(int16_t temperature) {
+      printf("Temperature: %d\n", temperature);
+      // Your code to display the temperature in your application
+  }
 
+
+  // Define your timer callback function
+  sl_sleeptimer_timer_callback_t myCallback = myTimerCallback; // Rename to myCallback
+  sl_sleeptimer_timer_handle_t timer_handle; // Declaration of timer_handle
+  uint32_t timeout_ms = 1000;  // Some constant value for the timeout
+  void *callbackData = NULL;  // No specific callback data required
+  uint8_t priority = 0;  // Some constant value for priority
+  uint16_t option_flags = 0;  // Some constant value
   switch (SL_BT_MSG_ID(evt->header)) {
     // -------------------------------
     // This event indicates the device has started and the radio is ready.
@@ -119,7 +135,7 @@ void sl_bt_on_event(sl_bt_msg_t *evt)
         int16_t bleTemperature;
         sl_status_t status = getAndConvertTemperatureToBLE(&bleTemperature);
 
-        if (status == SL_STATUS_OK){
+        if (status == SL_STATUS_OK) {
             app_log_info("Temperature (BLE format): %d\n", bleTemperature);
         } else {
             app_log_info("Failed to get temperature (Status: %lu)\n", (unsigned long)status);
@@ -131,9 +147,102 @@ void sl_bt_on_event(sl_bt_msg_t *evt)
         if (read_request->characteristic == gattdb_temperature_0) {
             app_log_info("Read request for gattdb_temperature_0 detected.\n");
             // Handle gattdb_temperature_0 read request here if needed
+
+            // Prepare to send response
+            uint16_t sent_len = 0;
+            uint8_t att_errorcode = 0; // Assuming no error
+            uint8_t response_value[] = {0x00, 0x01, 0x02}; // Example response value
+            size_t response_value_len = sizeof(response_value) / sizeof(response_value[0]);
+
+            // Send user read response
+            sl_status_t response_status = sl_bt_gatt_server_send_user_read_response(
+                read_request->connection,
+                read_request->characteristic,
+                att_errorcode,
+                response_value_len,
+                response_value,
+                &sent_len
+            );
+
+            // Check if response is sent successfully and log accordingly
+            if (response_status == SL_STATUS_OK) {
+                app_log_info("User read response sent successfully.\n");
+            } else {
+                app_log_info("Failed to send user read response (Status: %lu)\n", (unsigned long)response_status);
+            }
         }
     }
     break;
+    case sl_bt_evt_gatt_server_characteristic_status_id: {
+        const sl_bt_evt_gatt_server_characteristic_status_t *status_evt = &evt->data.evt_gatt_server_characteristic_status;
+
+        if (status_evt->characteristic == gattdb_temperature_0) {
+            if (status_evt->client_config_flags & gatt_notification) {
+                app_log_info("Notify received for temperature characteristic. Starting timer...\n");
+
+                // Start the timer when Notify is received
+                sl_status_t status = sl_sleeptimer_start_periodic_timer(
+                    &timer_handle,
+                    timeout_ms,
+                    myTimerCallback,
+                    callbackData,  // Pass the address of callback data
+                    priority,
+                    option_flags
+                );
+
+                // Check status and handle errors if any
+                if (status != SL_STATUS_OK) {
+                    app_log_info("Failed to start the timer.\n");
+                    // Handle the failure to start the timer
+                } else {
+                    // Get and display the temperature when the notification is received
+                    int16_t bleTemperature;
+                    sl_status_t tempStatus = getAndConvertTemperatureToBLE(&bleTemperature);
+                    if (tempStatus == SL_STATUS_OK) {
+                        displayTemperature(bleTemperature);
+                    } else {
+                        app_log_info("Failed to get temperature (Status: %lu)\n", (unsigned long)tempStatus);
+                        // Handle the failure to get temperature
+                    }
+                }
+            } else {
+                app_log_info("Notify not received for temperature characteristic. Stopping timer...\n");
+
+                // Stop the timer if Notify is not received
+                sl_status_t stop_timer_status = sl_sleeptimer_stop_timer(&timer_handle);
+
+                // Check status and handle errors if any
+                if (stop_timer_status != SL_STATUS_OK) {
+                    app_log_info("Failed to stop the timer.\n");
+                    // Handle the failure to stop the timer
+                }
+            }
+        }
+    }
+    break;
+    case sl_bt_evt_gatt_server_user_write_request_id: {
+        const sl_bt_evt_gatt_server_user_write_request_t *write_request = &evt->data.evt_gatt_server_user_write_request;
+
+        // Check if the write request is for the Digital characteristic
+        if (write_request->characteristic == gattdb_digital_characteristic) {
+            app_log_info("Write request for digital characteristic detected.\n");
+
+            // Access the written value and its length
+            const uint8_t *data = write_request->value.data;
+            size_t data_len = write_request->value.len;
+
+            // Process the written value
+            // Here you can use 'data' and 'data_len' to handle the written value as needed
+        }
+    }
+    break;
+
+
+
+
+
+
+
     // -------------------------------
     // This event indicates that a connection was closed.
     case sl_bt_evt_connection_closed_id:
